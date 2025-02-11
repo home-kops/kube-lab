@@ -1,0 +1,6 @@
+---
+- name: Create the VM for the Kubernetes lab
+  hosts: c1_cp1
+  tasks:
+  - name: Verify I can connect to my cp
+    ansible.builtin.shell: echo "It works"
