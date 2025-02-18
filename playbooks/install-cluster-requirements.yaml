@@ -8,14 +8,13 @@
      register: swap_disabled
      changed_when: swap_disabled.rc != 0
 
-   - name: Define k8s modules to load
-     ansible.builtin.command: |
-       cat <<EOF | tee /etc/modules-load.d/k8s.conf
+   - name: Define k8s modules to load file
+     ansible.builtin.copy:
+      dest: /etc/modules-load.d/k8s.conf
+      content: |
        overlay
        br_netfilter
-       EOF
-     register: k8s_conf_created
-     changed_when: k8s_conf_created.rc != 0
+      mode: '0755'
 
    - name: Load the k8s modules
      ansible.builtin.command: modprobe --all overlay br_netfilter
@@ -23,32 +22,44 @@
      changed_when: k8s_modules_loaded.rc != 0
 
    - name: Enable IPv4 forwarding
-     ansible.builtin.command: |
-       cat <<EOF | tee /etc/sysctl.d/k8s.conf
+     ansible.builtin.copy:
+      dest: /etc/sysctl.d/k8s.conf
+      content: |
        net.ipv4.ip_forward = 1
-       EOF
-     register: enable_ipv4_forwarding
-     changed_when: enable_ipv4_forwarding.rc != 0
+      mode: '0755'
 
    - name: Apply IPv4 forwarding changes
      ansible.builtin.command: sysctl --system
      register: ipv4_forwarding_applied
      changed_when: ipv4_forwarding_applied.rc != 0
 
-   - name: Install containerd
-     ansible.builtin.command: apt update && apt install -y containerd
-     register: install_containerd
-     changed_when: install_containerd.rc != 0
+   - name: Update repositories cache and install containerd
+     ansible.builtin.apt:
+      name: containerd
+      state: present
+      update_cache: true
 
-   - name: Configure containerd
-     ansible.builtin.command: |
-       mkdir -p /etc/containerd
-       containerd config default | tee /etc/containerd/config.toml
+   - name: Create containerd configuration directory
+     ansible.builtin.file:
+      path: /etc/containerd
+      state: directory
+      mode: '0755'
 
-       sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
-       grep "SystemdCgroup = true" /etc/containerd/config.toml
+   - name: Create containerd configuration file
+     ansible.builtin.command: containerd config default > /etc/containerd/config.toml
      register: configure_containerd
      changed_when: configure_containerd.rc != 0
+
+   - name: Enable SystemdCgroup
+     ansible.builtin.replace:
+      path: /etc/containerd/config.toml
+      regexp: 'SystemdCgroup = false'
+      replace: 'SystemdCgroup = true'
+
+   - name: Verify SystemdCgroup is enabled
+     ansible.builtin.command: grep "SystemdCgroup = true" /etc/containerd/config.toml
+     register: systemcdgroup_configured
+     changed_when: systemcdgroup_configured.rc != 0
 
    - name: Restart containerd
      ansible.builtin.systemd_service:
